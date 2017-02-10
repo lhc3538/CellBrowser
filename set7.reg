@@ -1,0 +1,10 @@
+REGEDIT4
+
+  [HKEY_CURRENT_USER\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\ftp\UserChoice]
+"Progid"="Cell.Http"
+  [HKEY_CURRENT_USER\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice]
+"Progid"="Cell.Http"
+  [HKEY_CURRENT_USER\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice]
+"Progid"="Cell.Http"
+  [HKEY_CLASSES_ROOT\Cell.Http\shell\open\command]
+@="\"F:\\CellBrowser\\cell.exe\" %1"

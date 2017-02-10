@@ -1,0 +1,6 @@
+REGEDIT4
+
+  [HKEY_CLASSES_ROOT\http\shell]
+@="Cell.Http"
+  [HKEY_CLASSES_ROOT\https\shell]
+@="Cell.Http"

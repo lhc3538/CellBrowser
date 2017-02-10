@@ -1,0 +1,13 @@
+bin\Debug\MyBrowser.exe
+bin\Debug\MyBrowser.pdb
+bin\Debug\Interop.IWshRuntimeLibrary.dll
+obj\Debug\ResolveAssemblyReference.cache
+obj\Debug\Interop.IWshRuntimeLibrary.dll
+obj\Debug\MyBrowser.csproj.ResolveComReference.cache
+obj\Debug\MyBrowser.ReadForm.resources
+obj\Debug\MyBrowser.MainForm.resources
+obj\Debug\MyBrowser.Properties.Resources.resources
+obj\Debug\MyBrowser.SendForm.resources
+obj\Debug\MyBrowser.csproj.GenerateResource.Cache
+obj\Debug\MyBrowser.exe
+obj\Debug\MyBrowser.pdb

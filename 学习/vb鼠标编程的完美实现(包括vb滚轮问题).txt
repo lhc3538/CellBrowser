@@ -1,0 +1,633 @@
+    本例代码中包含vb鼠标的整体解决，不仅仅是解决滚轮问题！
+    vb滚轮的实现，不管是钩子还是子分类方式都极不稳定，
+容易导致应用程序中止退出。
+    还是老外厉害，同样是api方式实现，
+但本例的实现近乎完美，极其稳定！
+    缺陷大概是需要写多处的代码，滚动前需要单击滚轮
+
+首先把模块MHookXP.bas，类CHookMouseWheel.cls，类CHookMouseEvents.cls加入你的工程中（在文档中后段）。
+
+然后在需要滚轮的窗口中：
+窗口模块声明：
+Private WithEvents m_MW As CHookMouseWheel
+窗口load事件添加代码
+Private Sub Form_Load()
+   Set m_MW = New CHookMouseWheel
+   m_MW.hWnd = Me.hWnd
+end sub
+窗口中再添加如下代码，实现msflexgrid的滚轮查看数据。
+Private Sub m_MW_MouseWheel(ByVal hWnd As Long, ByVal Delta As Long, ByVal Shift As Long, ByVal Button As Long, ByVal X As Long, ByVal Y As Long, Cancel As Boolean)
+
+   If TypeOf Screen.ActiveControl Is MSFlexGrid Then         sub_MouseWheel Delta, X, Y
+End Sub
+
+'下面这个过程可以放到公用模块中
+Public Sub sub_MouseWheel(ByVal Rotation As Long, ByVal Xpos As Long, ByVal Ypos As Long)
+    Dim NewValue As Long  
+    Dim Lstep As Single '控制每次移动几行
+    Dim iA
+    On Error Resume Next
+    iA = 0
+
+    With Screen.ActiveControl
+        Lstep = .Height / .RowHeight(0)
+        Lstep = Int(Lstep)
+        If Lstep < 10 Then
+            Lstep = 10
+        End If
+        Lstep = 1
+        If Rotation > 0 Then
+            NewValue = .TopRow - Lstep
+            If NewValue < 1 Then
+                NewValue = 1
+            End If
+        Else
+            NewValue = .TopRow + Lstep
+            If NewValue > .Rows - 1 Then
+                NewValue = .Rows - 1
+            End If
+        End If
+        
+        If .Rows > .FixedRows Then
+           iA = IIf(.FixedRows >= NewValue, .FixedRows, NewValue)
+           If iA > .Rows Then iA = .Rows - 1
+           .TopRow = iA
+        End If
+        
+    End With
+End Sub
+
+下边是类CHookMouseWheel.cls的内容
+
+' *************************************************************************
+'  Copyright ?997-2009 Karl E. Peterson
+'  All Rights Reserved, http://vb.mvps.org/
+' *************************************************************************
+'  You are free to use this code within your own applications, but you
+'  are expressly forbidden from selling or otherwise distributing this
+'  source code, non-compiled, without prior written consent.
+' *************************************************************************
+Option Explicit
+
+' Win32 API Declarations
+Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal length As Long)
+Private Declare Function IsWindow Lib "user32" (ByVal hWnd As Long) As Long
+Private Declare Function SystemParametersInfo Lib "user32" Alias "SystemParametersInfoA" (ByVal uAction As Long, ByVal uParam As Long, lpvParam As Any, ByVal fuWinIni As Long) As Long
+Private Declare Function GetSystemMetrics Lib "user32" (ByVal nIndex As Long) As Long
+Private Declare Function WindowFromPoint Lib "user32" (ByVal xPoint As Long, ByVal yPoint As Long) As Long
+Private Declare Function GetKeyState Lib "user32" (ByVal nVirtKey As Long) As Integer
+
+' Mousewheel constants and data structures
+Private Const WM_NCDESTROY As Long = &H82
+Private Const WM_XBUTTONDOWN As Long = &H20B         '(_WIN32_WINNT >= 0x0500)
+Private Const WM_XBUTTONUP As Long = &H20C           '(_WIN32_WINNT >= 0x0500)
+Private Const WM_XBUTTONDBLCLK As Long = &H20D       '(_WIN32_WINNT >= 0x0500)
+Private Const WM_MOUSEWHEEL As Long = &H20A
+Private Const WM_MOUSEHWHEEL As Long = &H20E         '(_WIN32_WINNT >= 0x0600)
+Private Const SM_MOUSEWHEELPRESENT As Long = 75
+Private Const SPI_GETWHEELSCROLLLINES As Long = 104
+Private Const SPI_SETWHEELSCROLLLINES As Long = 105
+Private Const SPI_GETWHEELSCROLLCHARS As Long = 108  '(_WIN32_WINNT >= 0x0600)
+Private Const SPI_SETWHEELSCROLLCHARS As Long = 109  '(_WIN32_WINNT >= 0x0600)
+
+Private Const WHEEL_PAGESCROLL As Long = -1        ' (UINT_MAX) /* Scroll one page */
+Private Const WHEEL_DELTA As Long = 120            ' /* Value for rolling one detent */
+
+Private Type POINTAPI
+   X As Long
+   Y As Long
+End Type
+
+' Key State Masks for Mouse Messages
+Private Const MK_LBUTTON As Long = &H1
+Private Const MK_RBUTTON As Long = &H2
+Private Const MK_SHIFT As Long = &H4
+Private Const MK_CONTROL As Long = &H8
+Private Const MK_MBUTTON As Long = &H10
+
+' Key State Masks for GetKeyState function
+Private Const VK_LBUTTON As Long = &H1
+Private Const VK_RBUTTON As Long = &H2
+Private Const VK_MBUTTON As Long = &H4             '  NOT contiguous with L RBUTTON
+Private Const VK_SHIFT As Long = &H10
+Private Const VK_CONTROL As Long = &H11
+Private Const VK_MENU As Long = &H12
+
+' Subclassing interface
+Implements IHookXP
+
+' Events
+Public Event MouseWheel(ByVal hWnd As Long, ByVal Delta As Long, ByVal Shift As Long, ByVal Button As Long, ByVal X As Long, ByVal Y As Long, ByRef Cancel As Boolean)
+Public Event MouseWheelH(ByVal hWnd As Long, ByVal Delta As Long, ByVal Shift As Long, ByVal Button As Long, ByVal X As Long, ByVal Y As Long, ByRef Cancel As Boolean)
+
+' Member variables
+Private m_hWnd As Long
+Private m_Enabled As Boolean
+
+' Default values.
+Private Const defEnabled As Boolean = True
+
+' *********************************************
+'  Initialize/Terminate
+' *********************************************
+Private Sub Class_Initialize()
+   ' Set defaults
+   m_Enabled = defEnabled
+End Sub
+
+Private Sub Class_Terminate()
+   ' Tear down
+   Call Unhook
+End Sub
+
+' *********************************************
+'  Public Properties
+' *********************************************
+Public Property Let Enabled(ByVal NewValue As Boolean)
+   m_Enabled = NewValue 'persist
+End Property
+
+Public Property Get Enabled() As Boolean
+   Enabled = m_Enabled  'report
+End Property
+
+Public Property Let hWnd(ByVal NewValue As Long)
+   ' Clear any existing hook, first.
+   Call Unhook
+   ' Set hook into new window, if possible.
+   If IsWindow(NewValue) Then
+      If HookSet(NewValue, Me) Then
+         m_hWnd = NewValue
+      End If
+   End If
+End Property
+
+Public Property Get hWnd() As Long
+   hWnd = m_hWnd  'report
+End Property
+
+' *********************************************
+'  Public Properties (read-only)
+' *********************************************
+Public Property Get Present() As Boolean
+   Present = CBool(GetSystemMetrics(SM_MOUSEWHEELPRESENT))
+End Property
+
+Public Property Get ScrollChars() As Long
+   ' No OS support for hscroll until Vista.
+   If SystemParametersInfo(SPI_GETWHEELSCROLLCHARS, 0&, ScrollChars, 0&) = False Then
+      ' Err.LastDllError = 1439 (Invalid system-wide (SPI_*) parameter)
+      ScrollChars = 1
+   End If
+End Property
+
+Public Property Get ScrollLines() As Long
+   Call SystemParametersInfo(SPI_GETWHEELSCROLLLINES, 0&, ScrollLines, 0&)
+End Property
+
+' *********************************************
+'  Private Methods
+' *********************************************
+Private Function ReadButtonStates() As Long
+   Dim Mask As Long
+   Const HighBit As Long = &H80000000
+   ' A series of GetKeyState calls builds mask of "shift" keys.
+   If GetKeyState(VK_LBUTTON) And HighBit Then
+      'Mask = Mask Or vbLeftButton
+      Mask = vbLeftButton
+   End If
+   If GetKeyState(VK_MBUTTON) And HighBit Then
+      Mask = Mask Or vbMiddleButton
+   End If
+   If GetKeyState(VK_RBUTTON) And HighBit Then
+      Mask = Mask Or vbRightButton
+   End If
+   ' Return accumulated mask value
+   ReadButtonStates = Mask
+End Function
+
+Private Function ReadKeyStates() As Long
+   Dim Mask As Long
+   Const HighBit As Long = &H80000000
+   ' A series of GetKeyState calls builds mask of "shift" keys.
+   If GetKeyState(VK_SHIFT) And HighBit Then
+      'Mask = Mask Or vbShiftMask
+      Mask = vbShiftMask
+   End If
+   If GetKeyState(VK_CONTROL) And HighBit Then
+      Mask = Mask Or vbCtrlMask
+   End If
+   If GetKeyState(VK_MENU) And HighBit Then
+      Mask = Mask Or vbAltMask
+   End If
+   ' Return accumulated mask value
+   ReadKeyStates = Mask
+End Function
+
+Private Sub Unhook()
+   ' Clear existing hook.
+   If m_hWnd Then
+      Call HookClear(m_hWnd, Me)
+      m_hWnd = 0
+   End If
+End Sub
+
+Public Function WordHi(ByVal DWord As Long) As Integer
+   Call CopyMemory(WordHi, ByVal VarPtr(DWord) + 2, 2)
+End Function
+
+Public Function WordLo(ByVal DWord As Long) As Integer
+   Call CopyMemory(WordLo, DWord, 2)
+End Function
+
+' *********************************************
+'  Implemented Subclassing Interface
+' *********************************************
+Private Function IHookXP_Message(ByVal hWnd As Long, ByVal uiMsg As Long, ByVal wParam As Long, ByVal lParam As Long, ByVal dwRefData As Long) As Long
+   'Best Practices for Supporting Microsoft Mouse and Keyboard Devices
+   'http://msdn.microsoft.com/en-us/library/ms997498.aspx
+   Dim EatIt As Boolean
+   Dim Delta As Long
+   Dim pt As POINTAPI
+   Dim hWndOver As Long
+   Dim Button As Long
+   Dim Shift As Long
+   Dim Cancel As Boolean
+   
+   ' Special processing for messages we care about.
+   Select Case uiMsg
+      Case WM_MOUSEWHEEL, WM_MOUSEHWHEEL
+         If m_Enabled Then
+            ' Gather all available information about event.
+            Button = ReadButtonStates()
+            Shift = ReadKeyStates()
+            Delta = WordHi(wParam)
+            pt.X = WordLo(lParam)
+            pt.Y = WordHi(lParam)
+            hWndOver = WindowFromPoint(pt.X, pt.Y)
+            
+            ' Alert client that wheel event occurred.
+            If uiMsg = WM_MOUSEWHEEL Then
+               RaiseEvent MouseWheel(hWndOver, Delta, Shift, Button, pt.X, pt.Y, Cancel)
+            Else
+               RaiseEvent MouseWheelH(hWndOver, Delta, Shift, Button, pt.X, pt.Y, Cancel)
+            End If
+            
+            ' Fire default handler, just in case, but tell Windows
+            ' that we handled it regardless.  VB Forms don't react
+            ' at all to these messages, but the baseclass for some
+            ' controls (eg, textbox) will use it, so it depends on
+            ' what the client is subclassing how this will play.
+            If Cancel = False Then
+               Call HookDefault(hWnd, uiMsg, wParam, lParam)
+            End If
+            IHookXP_Message = 1  'True
+            EatIt = True
+         End If
+         
+      Case WM_NCDESTROY
+         Call Unhook  ' !!!
+   End Select
+   
+   ' Pass back to default message handler.
+   If EatIt = False Then
+      IHookXP_Message = HookDefault(hWnd, uiMsg, wParam, lParam)
+   End If
+End Function
+
+
+下边是类CHookMouseEvents.cls的内容
+' *************************************************************************
+'  Copyright ?997-2009 Karl E. Peterson
+'  All Rights Reserved, http://vb.mvps.org/
+' *************************************************************************
+'  You are free to use this code within your own applications, but you
+'  are expressly forbidden from selling or otherwise distributing this
+'  source code, non-compiled, without prior written consent.
+' *************************************************************************
+Option Explicit
+
+' Win32 API Declarations
+Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal length As Long)
+Private Declare Function TrackMouseEvent Lib "user32" (lpEventTrack As TRACKMOUSEEVENT_STRUCT) As Long
+
+' Mouse constants and data structures
+Private Const WM_NCDESTROY As Long = &H82
+Private Const WM_XBUTTONDOWN As Long = &H20B         '(_WIN32_WINNT >= 0x0500)
+Private Const WM_XBUTTONUP As Long = &H20C           '(_WIN32_WINNT >= 0x0500)
+Private Const WM_XBUTTONDBLCLK As Long = &H20D       '(_WIN32_WINNT >= 0x0500)
+
+Private Const WM_MOUSEACTIVATE As Long = &H21
+Private Const WM_MOUSEFIRST As Long = &H200
+Private Const WM_MOUSEMOVE As Long = &H200
+Private Const WM_LBUTTONDOWN As Long = &H201
+Private Const WM_LBUTTONUP As Long = &H202
+Private Const WM_LBUTTONDBLCLK As Long = &H203
+Private Const WM_RBUTTONDOWN As Long = &H204
+Private Const WM_RBUTTONUP As Long = &H205
+Private Const WM_RBUTTONDBLCLK As Long = &H206
+Private Const WM_MBUTTONDOWN As Long = &H207
+Private Const WM_MBUTTONUP As Long = &H208
+Private Const WM_MBUTTONDBLCLK As Long = &H209
+Private Const WM_MOUSELAST As Long = &H209
+
+Private Const WM_CAPTURECHANGED As Long = &H215
+
+Private Const WM_MOUSEHOVER As Long = &H2A1   'Based on TrackMouseEvent
+Private Const WM_MOUSELEAVE As Long = &H2A3   'Based on TrackMouseEvent
+
+Private Type TRACKMOUSEEVENT_STRUCT
+   cbSize As Long
+   dwFlags As Long
+   hWndTrack As Long
+   dwHoverTime As Long
+End Type
+
+Private Const TME_HOVER As Long = &H1
+Private Const TME_LEAVE As Long = &H2
+Private Const TME_NONCLIENT As Long = &H10
+Private Const TME_QUERY As Long = &H40000000
+Private Const TME_CANCEL As Long = &H80000000
+Private Const HOVER_DEFAULT As Long = &HFFFFFFFF
+
+' WM_MOUSEACTIVATE Return Codes
+Private Const MA_ACTIVATE = 1
+Private Const MA_ACTIVATEANDEAT = 2
+Private Const MA_NOACTIVATE = 3
+Private Const MA_NOACTIVATEANDEAT = 4
+
+' Subclassing interface
+Implements IHookXP
+
+' Events
+Public Event LostCapture(ByVal hWnd As Long, ByVal hWndCapture As Long)
+Public Event MouseEnter(ByVal hWnd As Long)
+Public Event MouseHover(ByVal hWnd As Long)
+Public Event MouseLeave(ByVal hWnd As Long)
+Public Event XButtonDblClick(ByVal hWnd As Long, ByVal Button As Long, ByVal X As Long, ByVal Y As Long)
+Public Event XButtonDown(ByVal hWnd As Long, ByVal Button As Long, ByVal X As Long, ByVal Y As Long)
+Public Event XButtonUp(ByVal hWnd As Long, ByVal Button As Long, ByVal X As Long, ByVal Y As Long)
+
+' Member variables
+Private m_hWnd As Long
+Private m_Enabled As Boolean
+Private m_HoverTime As Long
+Private m_Objects As Collection
+
+' Default values.
+Private Const defEnabled As Boolean = True
+Private Const defHoverTime As Long = HOVER_DEFAULT
+
+' *********************************************
+'  Initialize/Terminate
+' *********************************************
+Private Sub Class_Initialize()
+   ' Set defaults
+   m_Enabled = defEnabled
+   m_HoverTime = defHoverTime
+   Set m_Objects = New Collection
+End Sub
+
+Private Sub Class_Terminate()
+   ' Tear down
+   Call UnhookAll
+   Set m_Objects = Nothing
+End Sub
+
+' *********************************************
+'  Public Properties
+' *********************************************
+Public Property Let Enabled(ByVal NewValue As Boolean)
+   m_Enabled = NewValue 'persist
+End Property
+
+Public Property Get Enabled() As Boolean
+   Enabled = m_Enabled  'report
+End Property
+
+Public Property Let HoverTime(ByVal NewValue As Boolean)
+   m_HoverTime = NewValue 'persist
+End Property
+
+Public Property Get HoverTime() As Boolean
+   HoverTime = m_HoverTime  'report
+End Property
+
+' *********************************************
+'  Public Properties (read-only)
+' *********************************************
+
+' *********************************************
+'  Public Methods
+' *********************************************
+Public Function Add(obj As Object) As Boolean
+   On Error Resume Next
+   m_Objects.Add obj, FmtHex(obj.hWnd, 8)
+   If Err.Number = 0 Then 'success
+      If HookSet(obj.hWnd, Me) Then
+         Add = True
+      End If
+   Else
+      Debug.Print Err.Number, Err.Description
+   End If
+End Function
+
+Public Function Count() As Long
+   Count = m_Objects.Count
+End Function
+
+Public Function Item(ByVal hWnd As Long) As Object
+   On Error Resume Next
+   Set Item = m_Objects.Item(FmtHex(hWnd, 8))
+End Function
+
+Public Function Remove(obj As Object) As Boolean
+   On Error Resume Next
+   Remove = UnhookOne(obj.hWnd)
+End Function
+   
+' *********************************************
+'  Private Methods
+' *********************************************
+Public Function FmtHex(ByVal InVal As Long, ByVal OutLen As Integer) As String
+   ' Left pad with zeros to OutLen.
+   FmtHex = "&h" & Right$(String$(OutLen, "0") & Hex$(InVal), OutLen)
+End Function
+
+Private Sub UnhookAll()
+   Dim obj As Object
+   ' Clear existing hook.
+   For Each obj In m_Objects
+      Call HookClear(obj.hWnd, Me)
+   Next obj
+End Sub
+
+Private Function UnhookOne(ByVal hWnd As Long) As Boolean
+   On Error Resume Next
+   m_Objects.Remove FmtHex(hWnd, 8)
+   If Err.Number = 0 Then 'success
+      If HookClear(hWnd, Me) Then
+         UnhookOne = True
+      End If
+   Else
+      Debug.Print Err.Number, Err.Description
+   End If
+End Function
+
+Public Function WordHi(ByVal DWord As Long) As Integer
+   Call CopyMemory(WordHi, ByVal VarPtr(DWord) + 2, 2)
+End Function
+
+Public Function WordLo(ByVal DWord As Long) As Integer
+   Call CopyMemory(WordLo, DWord, 2)
+End Function
+
+' *********************************************
+'  Implemented Subclassing Interface
+' *********************************************
+Private Function IHookXP_Message(ByVal hWnd As Long, ByVal uiMsg As Long, ByVal wParam As Long, ByVal lParam As Long, ByVal dwRefData As Long) As Long
+   'Best Practices for Supporting Microsoft Mouse and Keyboard Devices
+   'http://msdn.microsoft.com/en-us/library/ms997498.aspx
+   Static hWndLast As Long
+   Dim EatIt As Boolean
+   
+   ' Special processing for messages we care about.
+   Select Case uiMsg
+      Case WM_MOUSEMOVE
+         ' The Old New Thing : Why is there no WM_MOUSEENTER message?
+         ' http://blogs.msdn.com/oldnewthing/archive/2003/10/13/55279.aspx
+         If hWnd <> hWndLast Then
+            hWndLast = hWnd  'Set flag
+            If m_Enabled Then
+               RaiseEvent MouseEnter(hWnd)
+            End If
+            ' Start tracking for Leave event.
+            StartTrackingMouse hWnd, TME_LEAVE Or TME_HOVER
+         End If
+      
+      Case WM_MOUSEHOVER
+         If m_Enabled Then
+            RaiseEvent MouseHover(hWnd)
+         End If
+      
+      Case WM_MOUSELEAVE
+         hWndLast = 0  'Clear flag
+         If m_Enabled Then
+            RaiseEvent MouseLeave(hWnd)
+         End If
+         
+      Case WM_CAPTURECHANGED
+         If m_Enabled Then
+            RaiseEvent LostCapture(hWnd, lParam)
+         End If
+         
+      Case WM_XBUTTONDOWN
+         If m_Enabled Then
+            RaiseEvent XButtonDown(hWnd, WordHi(wParam), WordLo(lParam), WordHi(lParam))
+         End If
+         
+      Case WM_XBUTTONUP
+         If m_Enabled Then
+            RaiseEvent XButtonUp(hWnd, WordHi(wParam), WordLo(lParam), WordHi(lParam))
+         End If
+         
+      Case WM_XBUTTONDBLCLK
+         If m_Enabled Then
+            RaiseEvent XButtonDblClick(hWnd, WordHi(wParam), WordLo(lParam), WordHi(lParam))
+         End If
+         
+      Case WM_NCDESTROY
+         Call UnhookOne(hWnd)  ' !!!
+         
+   End Select
+   
+   ' Pass back to default message handler.
+   If EatIt = False Then
+      IHookXP_Message = HookDefault(hWnd, uiMsg, wParam, lParam)
+   End If
+End Function
+
+Private Function StartTrackingMouse(ByVal hWnd As Long, ByVal Flags As Long) As Long
+   Dim tme As TRACKMOUSEEVENT_STRUCT
+   ' Wrap all the mess into a tidy little procedure.
+   With tme
+      .cbSize = Len(tme)
+      .dwFlags = Flags
+      If .dwFlags And TME_HOVER Then
+         .dwHoverTime = m_HoverTime
+      End If
+      .hWndTrack = hWnd
+   End With
+   ' Return results.
+   StartTrackingMouse = TrackMouseEvent(tme)
+End Function
+
+Private Sub DumpMsg(ByVal hWnd As Long, ByVal uiMsg As Long, ByVal wParam As Long, ByVal lParam As Long, ByVal dwRefData As Long)
+   ' Call DumpMsg(hWnd, uiMsg, wParam, lParam, dwRefData)
+   Debug.Print "hWnd: 0x"; Hex$(hWnd), "Msg: 0x"; Hex$(uiMsg), _
+               "wParam: 0x"; Hex$(wParam), "lParam: 0x"; Hex$(lParam), _
+               "RefData: "; dwRefData
+End Sub
+
+下边是模块MHookXP.bas的内容
+' *************************************************************************
+'  Copyright ?009 Karl E. Peterson
+'  All Rights Reserved, http://vb.mvps.org/
+' *************************************************************************
+'  You are free to use this code within your own applications, but you
+'  are expressly forbidden from selling or otherwise distributing this
+'  source code, non-compiled, without prior written consent.
+' *************************************************************************
+Option Explicit
+
+' The *Subclass APIs in comctl32 were not exported by name until XP, and
+' even in XP GetWindowSubclass remains exported only by ordinal.  All four
+' functions first appeared in v4.71 of comctl32.dll, which shipped with
+' Windows 98 and/or IE 4.01 - more details here:
+' http://www.geoffchappell.com/studies/windows/shell/comctl32/history/ords472.htm
+Private Declare Function SetWindowSubclass Lib "comctl32" Alias "#410" (ByVal hWnd As Long, ByVal pfnSubclass As Long, ByVal uIdSubclass As Long, ByVal dwRefData As Long) As Long
+Private Declare Function GetWindowSubclass Lib "comctl32" Alias "#411" (ByVal hWnd As Long, ByVal pfnSubclass As Long, ByVal uIdSubclass As Long, pdwRefData As Long) As Long
+Private Declare Function RemoveWindowSubclass Lib "comctl32" Alias "#412" (ByVal hWnd As Long, ByVal pfnSubclass As Long, ByVal uIdSubclass As Long) As Long
+Private Declare Function DefSubclassProc Lib "comctl32" Alias "#413" (ByVal hWnd As Long, ByVal uMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+
+' RemoveWindowsHook must be called prior to destruction.
+Private Const WM_NCDESTROY As Long = &H82
+
+Public Function HookSet(ByVal hWnd As Long, ByVal Thing As IHookXP, Optional dwRefData As Long) As Boolean
+   ' http://msdn.microsoft.com/en-us/library/bb762102(VS.85).aspx
+   HookSet = CBool(SetWindowSubclass(hWnd, AddressOf SubclassProc, ObjPtr(Thing), dwRefData))
+End Function
+
+Public Function HookGetData(ByVal hWnd As Long, ByVal Thing As IHookXP) As Long
+   Dim dwRefData As Long
+   ' http://msdn.microsoft.com/en-us/library/bb776430(VS.85).aspx
+   If GetWindowSubclass(hWnd, AddressOf SubclassProc, ObjPtr(Thing), dwRefData) Then
+      HookGetData = dwRefData
+   End If
+End Function
+
+Public Function HookClear(ByVal hWnd As Long, ByVal Thing As IHookXP) As Boolean
+   ' http://msdn.microsoft.com/en-us/library/bb762094(VS.85).aspx
+   HookClear = CBool(RemoveWindowSubclass(hWnd, AddressOf SubclassProc, ObjPtr(Thing)))
+End Function
+
+Public Function HookDefault(ByVal hWnd As Long, ByVal uiMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+   ' http://msdn.microsoft.com/en-us/library/bb776403(VS.85).aspx
+   HookDefault = DefSubclassProc(hWnd, uiMsg, wParam, lParam)
+End Function
+
+Public Function SubclassProc(ByVal hWnd As Long, ByVal uiMsg As Long, ByVal wParam As Long, ByVal lParam As Long, ByVal uIdSubclass As IHookXP, ByVal dwRefData As Long) As Long
+   ' http://msdn.microsoft.com/en-us/library/bb776774(VS.85).aspx
+   SubclassProc = uIdSubclass.Message(hWnd, uiMsg, wParam, lParam, dwRefData)
+   ' This should *never* be necessary, but just in case client fails to...
+   If uiMsg = WM_NCDESTROY Then
+      Call HookClear(hWnd, uIdSubclass)
+   End If
+End Function
+
+
+
+
+ 
+
+
